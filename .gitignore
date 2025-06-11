@@ -52,3 +52,18 @@ chroma/
 
 # Ignore worker keys file
 worker_keys.json
+
+# Test files and temporary data
+test_*.py
+check_*.py
+analyze_*.py
+*_analysis_*.json
+test.txt
+
+# Logs and debug files
+*_logs/
+minions_logs/
+minion_logs/
+
+# Streamlit cache
+.streamlit/

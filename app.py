@@ -1,6 +1,13 @@
 import streamlit as st
 import time
 
+st.set_page_config(
+    page_title="Minions UI", 
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 from minions.minion import Minion
 from minions.minions import Minions
 from minions.minions_mcp import SyncMinionsMCP, MCPConfigManager
@@ -42,14 +49,11 @@ transformers_available = "TransformersClient" in globals()
 gemini_available = "GeminiClient" in globals()
 
 
-# Log availability for debugging
-print(f"MLXLMClient available: {mlx_available}")
-print(f"CartesiaMLXClient available: {cartesia_available}")
-print(f"TransformersClient available: {transformers_available}")
-print(
-    f"Voice generation available: {voice_generation_available if voice_generation_available is not None else 'Not checked yet'}"
-)
-print(f"GeminiClient available: {gemini_available}")
+# Check client availability
+# MLXLMClient available: {mlx_available}
+# CartesiaMLXClient available: {cartesia_available}  
+# TransformersClient available: {transformers_available}
+# GeminiClient available: {gemini_available}
 
 
 class StructuredLocalOutput(BaseModel):
@@ -399,8 +403,12 @@ def message_callback(role, message, is_final=True):
                         st.markdown(
                             f"**✅ Job {job.manifest.job_id + 1} (Chunk {job.manifest.chunk_id + 1})**"
                         )
-                        answer = job.output.answer.replace("$", "\\$")
-                        st.markdown(f"Answer: {answer}")
+                        # 安全处理可能为None的answer
+                        if job.output.answer is not None:
+                            answer = job.output.answer.replace("$", "\\$")
+                            st.markdown(f"Answer: {answer}")
+                        else:
+                            st.markdown("Answer: _No answer provided_")
 
             elif isinstance(message, dict):
                 if "content" in message and isinstance(message["content"], (dict, str)):
@@ -418,8 +426,12 @@ def message_callback(role, message, is_final=True):
                 else:
                     st.write(message)
             else:
-                message = message.replace("$", "\\$")
-                st.markdown(message)
+                # 安全处理可能为None的message
+                if message is not None:
+                    message = message.replace("$", "\\$")
+                    st.markdown(message)
+                else:
+                    st.markdown("_No message content_")
 
 
 def initialize_clients(
@@ -482,6 +494,34 @@ def initialize_clients(
                 temperature=local_temperature,
                 max_tokens=int(local_max_tokens),
             )
+        elif local_provider == "SambaNova":
+            # For Minions protocol with SambaNova local client
+            local_api_key = api_key or os.getenv("SAMBANOVA_API_KEY")
+            
+            # Check model context limits for local SambaNova models
+            # Use dedicated local client (like Ollama)
+            from minions.clients.sambanova_local import SambanovaLocalClient
+            
+            local_model_context_limits = {
+                "Meta-Llama-3.1-8B-Instruct": 16384,  # 16k context
+                "Meta-Llama-3.3-70B-Instruct": 131072,  # 128k context
+                "DeepSeek-R1": 32768,  # 32k context
+                "Meta-Llama-3.2-3B-Instruct": 4096,  # 4k context
+                "Meta-Llama-3.2-1B-Instruct": 16384,  # 16k context
+            }
+            
+            local_max_context = local_model_context_limits.get(local_model_name, 16384)
+            local_safe_max_tokens = min(int(local_max_tokens), local_max_context - 1000)
+            
+            st.session_state.local_client = SambanovaLocalClient(
+                model_name=local_model_name,
+                temperature=local_temperature,
+                max_tokens=local_safe_max_tokens,
+                api_key=local_api_key,
+                use_async=use_async,  # 根据协议设置异步模式
+                num_ctx=local_max_context,
+                structured_output_schema=JobOutput,  # Use JobOutput for Minions protocol
+            )
 
         else:  # Ollama
             st.session_state.local_client = OllamaClient(
@@ -517,6 +557,33 @@ def initialize_clients(
                 hf_token=hf_token,
                 do_sample=(local_temperature > 0),
             )
+        elif local_provider == "SambaNova":
+            # For non-Minions protocols with SambaNova local client
+            local_api_key = api_key or os.getenv("SAMBANOVA_API_KEY")
+            
+            # Check model context limits for local SambaNova models
+            local_model_context_limits = {
+                "Meta-Llama-3.1-8B-Instruct": 16384,  # 16k context
+                "Meta-Llama-3.3-70B-Instruct": 131072,  # 128k context
+                "DeepSeek-R1": 32768,  # 32k context
+                "Meta-Llama-3.2-3B-Instruct": 4096,  # 4k context
+                "Meta-Llama-3.2-1B-Instruct": 16384,  # 16k context
+            }
+            
+            local_max_context = local_model_context_limits.get(local_model_name, 16384)
+            local_safe_max_tokens = min(int(local_max_tokens), local_max_context - 1000)
+            
+            from minions.clients.sambanova_local import SambanovaLocalClient
+            
+            st.session_state.local_client = SambanovaLocalClient(
+                model_name=local_model_name,
+                temperature=local_temperature,
+                max_tokens=local_safe_max_tokens,
+                api_key=local_api_key,
+                use_async=use_async,  # 根据协议设置异步模式
+                num_ctx=local_max_context,
+                structured_output_schema=None,  # No structured output for non-Minions protocols
+            )
         else:  # Ollama
             st.session_state.local_client = OllamaClient(
                 model_name=local_model_name,
@@ -535,7 +602,7 @@ def initialize_clients(
             # )
         except Exception as e:
             # Log but don't crash if calibration fails
-            print(f"Calibration failed: {str(e)}")
+            pass  # print(f"Calibration failed: {str(e)}")
 
     if provider == "OpenAI":
         # Add web search tool if responses API is enabled
@@ -635,11 +702,34 @@ def initialize_clients(
             api_key=api_key,
         )
     elif provider == "SambaNova":
-        st.session_state.remote_client = SambanovaClient(
-            model_name=remote_model_name,
-            temperature=remote_temperature,
-            max_tokens=int(remote_max_tokens),
+        # 基于官方文档的正确context limits
+        model_context_limits = {
+            "Meta-Llama-3.1-8B-Instruct": 16384,      # 16k
+            "Meta-Llama-3.3-70B-Instruct": 131072,    # 128k  
+            "Meta-Llama-3.1-405B-Instruct": 16384,    # 16k
+            "DeepSeek-R1": 32768,                      # 32k
+            "DeepSeek-V3-0324": 32768,                 # 32k
+            "QwQ-32B": 16384,                          # 16k
+            "Meta-Llama-3.2-3B-Instruct": 4096,       # 4k
+            "Meta-Llama-3.2-1B-Instruct": 16384,      # 16k
+        }
+        
+        max_context = model_context_limits.get(remote_model_name, 16384)  # Default to 16k
+        
+        # 确保max_tokens不超过模型的context limit，为prompt预留空间
+        safe_max_tokens = min(int(remote_max_tokens), max_context - 1000)
+        
+        if safe_max_tokens != int(remote_max_tokens):
+            st.warning(f"⚠️ Adjusted max_tokens from {remote_max_tokens} to {safe_max_tokens} to fit model's {max_context} token context limit")
+        
+        # Use dedicated remote client for SambaNova
+        from minions.clients.sambanova_remote import SambanovaRemoteClient
+        
+        st.session_state.remote_client = SambanovaRemoteClient(
+            model_name=remote_model_name,  # Use user-selected model
             api_key=api_key,
+            temperature=remote_temperature,
+            max_tokens=safe_max_tokens,
         )
     elif provider == "Gemini":
         st.session_state.remote_client = GeminiClient(
@@ -724,8 +814,8 @@ def initialize_clients(
             max_sources_per_round=5,
         )
     elif protocol == "Minion-CUA":
-        print(protocol)
-        print("Initializing Minion-CUA protocol...")
+        # print(protocol)
+        # print("Initializing Minion-CUA protocol...")
 
         # Import the custom CUA initial prompt
         from minions.prompts.minion_cua import SUPERVISOR_CUA_INITIAL_PROMPT
@@ -744,7 +834,7 @@ def initialize_clients(
         )
 
         # Test if the class is correctly initialized
-        print(f"Method type: {type(st.session_state.method).__name__}")
+        # print(f"Method type: {type(st.session_state.method).__name__}")
     else:  # Minion protocol
         st.session_state.method = Minion(
             st.session_state.local_client,
@@ -1483,7 +1573,7 @@ with st.sidebar:
 
     # Local model provider selection
     st.subheader("Local Model Provider")
-    local_provider_options = ["Ollama"]
+    local_provider_options = ["Ollama", "SambaNova"]
     if mlx_available:
         local_provider_options.append("MLX")
     if cartesia_available:
@@ -1538,6 +1628,21 @@ with st.sidebar:
                 "No HuggingFace token provided. Gated models may not be accessible."
             )
 
+    if local_provider == "SambaNova":
+        st.info(
+            "ℹ️ SambaNova provider will use the same API key as the remote provider if both are set to SambaNova."
+        )
+        
+        # Check if API key is available (either from remote provider or environment)
+        sambanova_api_key = api_key or os.getenv("SAMBANOVA_API_KEY")
+        if sambanova_api_key:
+            if selected_provider == "SambaNova":
+                st.success("**✓ Using SambaNova API key from remote provider settings.**")
+            else:
+                st.success("**✓ Using SambaNova API key from environment variables.**")
+        else:
+            st.warning("**⚠️ No SambaNova API key found.** Please set it in remote provider settings or as environment variable `SAMBANOVA_API_KEY`.")
+
     # Protocol selection
     st.subheader("Protocol")
 
@@ -1564,7 +1669,7 @@ with st.sidebar:
         protocol = st.segmented_control(
             "Communication protocol", options=protocol_options, default="Minion"
         )
-        print(protocol)
+        # print(protocol)
     else:
         # For providers that don't support all protocols, show a message and use the default
         st.info(f"The {selected_provider} provider only supports the Minion protocol.")
@@ -1719,7 +1824,15 @@ with st.sidebar:
                 "Helium-1-2b": "kyutai/helium-1-2b",
                 "Foundation-Sec-8B": "fdtn-ai/Foundation-Sec-8B",
             }
-        else:  # Ollama            # Get available Ollama models
+        elif local_provider == "SambaNova":
+            local_model_options = {
+                "Meta-Llama-3.1-8B-Instruct (Small Model - 16k context)": "Meta-Llama-3.1-8B-Instruct",
+                "Meta-Llama-3.3-70B-Instruct (Large Model - 128k context)": "Meta-Llama-3.3-70B-Instruct",
+                "DeepSeek-R1 (32k context)": "DeepSeek-R1",
+                "Meta-Llama-3.2-3B-Instruct (4k context)": "Meta-Llama-3.2-3B-Instruct",
+                "Meta-Llama-3.2-1B-Instruct (16k context)": "Meta-Llama-3.2-1B-Instruct",
+            }
+        else:  # Ollama
             available_ollama_models = OllamaClient.get_available_models()
 
             # Default recommended models list
@@ -1832,26 +1945,15 @@ with st.sidebar:
             default_model_index = 0
         elif selected_provider == "SambaNova":
             model_mapping = {
-                "Meta-Llama-3.1-8B-Instruct (Recommended)": "Meta-Llama-3.1-8B-Instruct",
-                "DeepSeek-V3-0324": "DeepSeek-V3-0324",
-                "Meta-Llama-3.3-70B-Instruct": "Meta-Llama-3.3-70B-Instruct",
-                "Meta-Llama-3.1-405B-Instruct": "Meta-Llama-3.1-405B-Instruct",
-                "Meta-Llama-3.1-70B-Instruct": "Meta-Llama-3.1-70B-Instruct",
-                "Meta-Llama-3.2-3B-Instruct": "Meta-Llama-3.2-3B-Instruct",
-                "Meta-Llama-3.2-1B-Instruct": "Meta-Llama-3.2-1B-Instruct",
-                "Llama-3.2-90B-Vision-Instruct": "Llama-3.2-90B-Vision-Instruct",
-                "Llama-3.2-11B-Vision-Instruct": "Llama-3.2-11B-Vision-Instruct",
-                "Meta-Llama-Guard-3-8B": "Meta-Llama-Guard-3-8B",
-                "Llama-3.1-Tulu-3-405B": "Llama-3.1-Tulu-3-405B",
-                "Llama-3.1-Swallow-8B-Instruct-v0.3": "Llama-3.1-Swallow-8B-Instruct-v0.3",
-                "Llama-3.1-Swallow-70B-Instruct-v0.3": "Llama-3.1-Swallow-70B-Instruct-v0.3",
-                "DeepSeek-R1": "DeepSeek-R1",
-                "DeepSeek-R1-Distill-Llama-70B": "DeepSeek-R1-Distill-Llama-70B",
-                "E5-Mistral-7B-Instruct": "E5-Mistral-7B-Instruct",
-                "Qwen2.5-72B-Instruct": "Qwen2.5-72B-Instruct",
-                "Qwen2.5-Coder-32B-Instruct": "Qwen2.5-Coder-32B-Instruct",
-                "QwQ-32B": "QwQ-32B",
-                "Qwen2-Audio-7B-Instruct": "Qwen2-Audio-7B-Instruct",
+                # 基于官方文档的正确模型列表
+                "Meta-Llama-3.1-8B-Instruct (16k context)": "Meta-Llama-3.1-8B-Instruct",
+                "Meta-Llama-3.3-70B-Instruct (128k context)": "Meta-Llama-3.3-70B-Instruct", 
+                "Meta-Llama-3.1-405B-Instruct (16k context)": "Meta-Llama-3.1-405B-Instruct",
+                "DeepSeek-R1 (32k context)": "DeepSeek-R1",
+                "DeepSeek-V3-0324 (32k context)": "DeepSeek-V3-0324",
+                "QwQ-32B (16k context)": "QwQ-32B",
+                "Meta-Llama-3.2-3B-Instruct (4k context)": "Meta-Llama-3.2-3B-Instruct",
+                "Meta-Llama-3.2-1B-Instruct (16k context)": "Meta-Llama-3.2-1B-Instruct",
             }
             default_model_index = 0
         elif selected_provider == "OpenRouter":

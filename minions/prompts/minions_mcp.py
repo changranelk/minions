@@ -148,7 +148,7 @@ First think step-by-step and then answer the question using the exact format bel
      - Use "provide_final_answer" if you have enough information
      - Use "request_additional_info" if you cannot conclusively answer
    - "explanation": A short statement about how you arrived at your conclusion or what is still missing
-   - "answer": The final answer string if "decision"="provide_final_answer", or null otherwise
+   - "answer": The final answer string if "decision"="provide_final_answer", or null if "decision"="request_additional_info"
    - "feedback": If decision="request_additional_info", provide clear instructions on what information is still needed. Be specific about:
      - What type of information to look for
      - Which sections or parts of the document to focus on
@@ -765,8 +765,10 @@ Field Descriptions:
 - explanation: A brief statement of your reasoning.
 - feedback: Specific information to look for, if needed. Use null if not applicable.
 - decision: Either "provide_final_answer" or "request_additional_info".
-- answer: The final answer if providing one; null otherwise.
+- answer: The final answer if decision is "provide_final_answer"; null if decision is "request_additional_info".
 - scratchpad: Summary of gathered information and current analysis for future reference.
+
+**IMPORTANT**: If you set decision to "provide_final_answer", you MUST provide the actual answer in the "answer" field. Do not leave it as null.
 
 Ensure the response is a valid JSON object without any additional text or formatting.
 

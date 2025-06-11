@@ -55,7 +55,8 @@ from minions.utils.retrievers import *
 
 
 def chunk_by_section(
-    doc: str, max_chunk_size: int = 3000, overlap: int = 20
+    # doc: str, max_chunk_size: int = 3000, overlap: int = 20
+    doc: str, max_chunk_size: int = 10000, overlap: int = 20
 ) -> List[str]:
     sections = []
     start = 0
@@ -84,8 +85,8 @@ class JobManifest(BaseModel):
 
 class JobOutput(BaseModel):
     explanation: str
-    citation: Optional[str]
-    answer: Optional[str]
+    citation: Optional[Union[str, List[str]]]
+    answer: Optional[Union[str, List[str]]]
 
 
 def prepare_jobs(
@@ -179,8 +180,8 @@ class Minions:
         self.worker_batch_size = 1 or kwargs.get("worker_batch_size", None)
         self.max_code_attempts = kwargs.get("max_code_attempts", 10)
         # TODO: removed worker_prompt
-        self.worker_prompt_template = WORKER_PROMPT_SHORT or kwargs.get(
-            "worker_prompt_template", None
+        self.worker_prompt_template = kwargs.get(
+            "worker_prompt_template", WORKER_PROMPT_SHORT
         )
         self.worker_icl_examples = WORKER_ICL_EXAMPLES or kwargs.get(
             "worker_icl_examples", None
@@ -662,8 +663,21 @@ class Minions:
             local_usage += usage
 
             def extract_job_output(response: str) -> JobOutput:
-                output = JobOutput.model_validate_json(response)
-                return output
+                import re
+                # Clean control characters from response
+                cleaned_response = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', response)
+                try:
+                    output = JobOutput.model_validate_json(cleaned_response)
+                    return output
+                except Exception as e:
+                    print(f"❌ Error parsing JSON: {e}")
+                    print(f"Response: {cleaned_response[:200]}...")
+                    # Return a default JobOutput
+                    return JobOutput(
+                        explanation=f"Failed to parse worker response: {str(e)}",
+                        citation=None,
+                        answer=None
+                    )
 
             jobs: List[Job] = []
             for worker_messages, sample, job_manifest, done_reason in zip(
@@ -678,6 +692,13 @@ class Minions:
                     continue
                 elif done_reason == "stop":
                     job_output = extract_job_output(response=sample)
+                elif done_reason == "error":
+                    # Handle API errors - create a default JobOutput
+                    job_output = JobOutput(
+                        explanation=f"API error occurred: {sample[:200]}...",
+                        citation=None,
+                        answer=None
+                    )
                 else:
                     raise ValueError(f"Unknown done reason: {done_reason}")
                 jobs.append(

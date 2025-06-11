@@ -720,8 +720,10 @@ Field Descriptions:
 - explanation: A brief statement of your reasoning.
 - feedback: Specific information to look for, if needed. Use null if not applicable.
 - decision: Either "provide_final_answer" or "request_additional_info".
-- answer: The final answer if providing one; null otherwise.
+- answer: The final answer if decision is "provide_final_answer"; null if decision is "request_additional_info".
 - scratchpad: Summary of gathered information and current analysis for future reference.
+
+**IMPORTANT**: If you set decision to "provide_final_answer", you MUST provide the actual answer in the "answer" field. Do not leave it as null.
 
 Ensure the response is a valid JSON object without any additional text or formatting.
 
@@ -754,6 +756,8 @@ Field Descriptions:
 - explanation: Brief statement of your reasoning
 - feedback: Any specific information that is lacking. NO CODE in this field. Use null if not needed
 - decision: must be "provide_final_answer"
-- answer: Final answer
+- answer: Your comprehensive final answer to the question (REQUIRED - do not leave as null)
 - scratchpad: Summary of gathered information and current analysis.
+
+**CRITICAL**: Since this is the final synthesis, you MUST provide a complete answer in the "answer" field. Do not leave it null or empty.
 """
